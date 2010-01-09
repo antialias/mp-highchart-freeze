@@ -3,7 +3,7 @@
 // ==/ClosureCompiler==
 /** 
  * @license Name:    Highcharts
- * Version: 1.1.0 (2009-12-18)
+ * Version: 1.1.1 (2010-01-06)
  * Author:  Vevstein Web
  * Support: www.highcharts.com/support
  * License: www.highcharts.com/license
@@ -14,8 +14,9 @@
  * Roadmap
  * 1.2
  * - Dynamic updating without redrawing the entire chart
- * - Add / remove series
- * - Add / remove point
+ * - Add and remove series
+ * - Add, remove and update point
+ * - Set axis extremes
  * - New state: selected
  * - Built-in table parser
  * - Logarithmic axis
@@ -27,8 +28,6 @@
  * - Improve pies: shadow, better dataLabels, 3D view.
  * 
  * Known issues:
- * - Line and spline mousetracker areas are sometimes wrong in the ends. Visualize
- *   the area of the combo example.
  * - FF2: Line graph disappearing when zooming in too closely. Open 
  *   http://highcharts.com/demo/?example=line-time-series&theme=default and zoom
  *   in to 6. June to 22. June.
@@ -89,6 +88,7 @@ var
 	animate,
 	getAjax;
 	
+// the jQuery adapter
 if (win.jQuery) {
 	var jQ = jQuery;
 	each = function(arr, fn){
@@ -135,6 +135,7 @@ if (win.jQuery) {
 		}
 	});
 	
+// the MooTools adapter
 } else if (win.MooTools) {
 	each = function (arr, fn){
 		arr.each(fn); // Mootools specific
@@ -273,7 +274,8 @@ function extend(a, b) {
  * @param {Object} options The new custom options
  */
 function setOptions(options) {
-	return defaultOptions = merge(defaultOptions, options);
+	defaultOptions = merge(defaultOptions, options);
+	return defaultOptions;
 }
 
 var defaultFont = 'normal 12px "Lucida Grande", "Lucida Sans Unicode", Verdana, Arial, Helvetica, sans-serif',
@@ -641,11 +643,11 @@ defaultPlotOptions.column = merge(defaultSeriesOptions, {
 	borderColor: '#FFFFFF',
 	borderWidth: 1,
 	borderRadius: 0,
-	groupPadding: .2,
-	pointPadding: .1,
+	groupPadding: 0.2,
+	pointPadding: 0.1,
 	states: {
 		hover: {
-			brightness: .1,
+			brightness: 0.1,
 			shadow: false
 		}
 	}
@@ -664,7 +666,7 @@ defaultPlotOptions.pie = merge(defaultSeriesOptions, {
 	slicedOffset: 10,
 	states: {
 		hover: {
-			brightness: .1,
+			brightness: 0.1,
 			shadow: false
 		}
 	}
@@ -805,8 +807,6 @@ function dateFormat(format, timestamp, capitalize) {
 		dayOfMonth = date.getUTCDate(),
 		month = date.getUTCMonth(),
 		fullYear = date.getUTCFullYear(),
-		amPm = 
-		
 		lang = defaultOptions.lang,
 		langWeekdays = lang.weekdays,
 		langMonths = lang.months,
@@ -849,7 +849,7 @@ function dateFormat(format, timestamp, capitalize) {
 	return capitalize ? format.substr(0, 1).toUpperCase() + format.substr(1) : format;
 };
 
-function getPosition (el)	{
+function getPosition (el) {
 	var p = { x: el.offsetLeft, y: el.offsetTop };
 	while (el.offsetParent)	{
 		el = el.offsetParent;
@@ -1067,7 +1067,7 @@ Layer.prototype = {
 		ctx.beginPath();
 		
 		if (symbol == 'square') {
-			var len = .707 * radius;
+			var len = 0.707 * radius;
 			ctx.moveTo(x - len, y - len);
 			ctx.lineTo(x + len, y - len);
 			ctx.lineTo(x + len, y + len);
@@ -1077,15 +1077,15 @@ Layer.prototype = {
 		} else if (symbol == 'triangle') {
 			y++;
 			ctx.moveTo(x, y - 1.33 * radius);
-			ctx.lineTo(x + radius, y + .67 * radius);
-			ctx.lineTo(x - radius, y + .67 * radius);
+			ctx.lineTo(x + radius, y + 0.67 * radius);
+			ctx.lineTo(x - radius, y + 0.67 * radius);
 			ctx.lineTo(x, y - 1.33 * radius);
 			
 		} else if (symbol == 'triangle-down') {
 			y--;
 			ctx.moveTo(x, y + 1.33 * radius);
-			ctx.lineTo(x - radius, y - .67 * radius);
-			ctx.lineTo(x + radius, y - .67 * radius);
+			ctx.lineTo(x - radius, y - 0.67 * radius);
+			ctx.lineTo(x + radius, y - 0.67 * radius);
 			ctx.lineTo(x, y + 1.33 * radius);
 			
 		} else if (symbol == 'diamond') {
@@ -1190,7 +1190,7 @@ Layer.prototype = {
 					position: ABSOLUTE,
 					left: x + PX,
 					whiteSpace: 'nowrap',
-					bottom: mathRound(layer.height - y - fontSize * .25) + PX,
+					bottom: mathRound(layer.height - y - fontSize * 0.25) + PX,
 					color: fill
 				}), div);
 				
@@ -1235,8 +1235,8 @@ Layer.prototype = {
 				y1 -= baselineCorrection * costheta;
 				y2 -= baselineCorrection * costheta;
 				
-				if (mathAbs(x1 - x2) < .1) x1 += .1; // strange IE painting bug
-				if (mathAbs(y1 - y2) < .1) y1 += .1; // strange IE painting bug
+				if (mathAbs(x1 - x2) < 0.1) x1 += 0.1; // strange IE painting bug
+				if (mathAbs(y1 - y2) < 0.1) y1 += 0.1; // strange IE painting bug
 				layer.svg += 
 					'<g_vml_:line from="'+ x1 +', '+ y1 +'" to="'+ x2 +', '+ y2 +'" stroked="false">'+
 						'<g_vml_:fill on="true" color="'+ fill +'"/>'+
@@ -1474,7 +1474,7 @@ function Chart (options) {
 		// reset maxTicks
 		maxTicks = null;
 		
-		// if zoom is called with no arguments, reset the axes
+		// if zoom is called with the resetSelection argumant, reset
 		if (event.resetSelection) each(axes, function(axis) { 
 			axis.reset();
 		});
@@ -1501,7 +1501,7 @@ function Chart (options) {
 		// re-translate series to new axes extremes
 		each(chart.series, function(serie) {
 			each(serie.areas, function(area) {
-				area.parentNode.removeChild(area);
+				if (area.parentNode) area.parentNode.removeChild(area);
 			});
 			serie.translate();
 			serie.createArea();
@@ -1534,7 +1534,7 @@ function Chart (options) {
 	 */
 	function showTitle () {
 		if (!chart.titleLayer) {
-			var titleLayer = chart.titleLayer = new Layer('title-layer', container, null, {
+			var titleLayer = new Layer('title-layer', container, null, {
 				zIndex: 5
 			});
 			
@@ -1549,6 +1549,8 @@ function Chart (options) {
 				className: 'highcharts-subtitle',
 				innerHTML: options.subtitle.text
 			}, options.subtitle.style, titleLayer.div);
+			
+			chart.titleLayer = titleLayer;
 		}
 	}
 	/**
@@ -1699,9 +1701,10 @@ function Chart (options) {
 						usePercentage = stacking == 'percent';
 	
 						// create a stack for this particular series type
-						if (stacking) 
-							var typeStack = stack[serie.type] = (stack[serie.type] || []);
-		
+						if (stacking) {
+							var typeStack = stack[serie.type] || [];
+							stack[serie.type] = typeStack;
+						}
 						if (usePercentage) {
 							dataMin = 0;
 							dataMax = 99;			
@@ -1930,12 +1933,14 @@ function Chart (options) {
 			]];
 			
 			var unit = units[6]; // default unit is years
-			var interval = unit[1], multiples = unit[2];
+			var interval = unit[1], 
+				multiples = unit[2];
 			
 			// loop through the units to find the one that best fits the tickInterval
 			for (var i = 0; i < units.length; i++)  {
 				unit = units[i];
-				interval = unit[1], multiples = unit[2];
+				interval = unit[1];
+				multiples = unit[2];
 				
 				
 				if (units[i+1]) {
@@ -1995,9 +2000,11 @@ function Chart (options) {
 			
 			// get tick positions
 			var i = 1, // for sikkerheits skuld
-				time = min = minDate.getTime() / timeFactor,
+				time = minDate.getTime() / timeFactor,
 				minYear = minDate.getUTCFullYear(),
 				minMonth = minDate.getUTCMonth();
+				
+			min = time;
 			
 			while (time < max && i < 100) {
 				tickPositions.push(time);
@@ -2052,8 +2059,8 @@ function Chart (options) {
 
 			// pad categorised axis to nearest half unit
 			if (categories) {
-				 min -= .5;
-				 max += .5;
+				 min -= 0.5;
+				 max += 0.5;
 			}
 
 			// dynamic label formatter 
@@ -2302,6 +2309,7 @@ function Chart (options) {
 			opposite = options.opposite, // needed in setOptions			
 			horiz = inverted ? !isXAxis : isXAxis,
 			stacks = {
+				bar: [],
 				column: [],
 				area: [],
 				areaspline: []
@@ -2340,7 +2348,7 @@ function Chart (options) {
 			// column plots are always categorized
 			categories = options.categories || (isXAxis && chart.columnCount), 
 			reversed = options.reversed,
-			tickmarkOffset = (categories && options.tickmarkPlacement == 'between') ? .5 : 0;
+			tickmarkOffset = (categories && options.tickmarkPlacement == 'between') ? 0.5 : 0;
 			//var hasWrittenTitle;
 			
 		// inverted charts have reversed xAxes as default
@@ -2500,7 +2508,7 @@ function Chart (options) {
 						position: ABSOLUTE,
 						border: 'none',
 						background: '#4572A7',
-						opacity: .25,
+						opacity: 0.25,
 						width: zoomX ? 0 : plotWidth + PX,
 						height: zoomY ? 0 : plotHeight + PX
 					});
@@ -2863,7 +2871,7 @@ function Chart (options) {
 			overflow: HIDDEN,
 			padding: '0 50px 5px 0',
 			zIndex: 8
-		}, container),
+		}, container);
 		
 		// the rounded corner box
 		boxLayer = new Layer('tooltip-box', tooltipDiv, null, {
@@ -2893,6 +2901,7 @@ function Chart (options) {
 				boxY,
 				boxWidth,
 				boxHeight,
+				oldInnerDivHeight = innerDiv.offsetHeight,
 				show,
 				text = point.tooltipText;
 				
@@ -2922,7 +2931,8 @@ function Chart (options) {
 				boxWidth = innerDiv.offsetWidth - borderWidth;
 				boxHeight = innerDiv.offsetHeight - borderWidth;
 				if (boxWidth > (boxLayer.w || 0) + 20 || boxWidth < (boxLayer.w || 0) - 20 || 
-						boxHeight > boxLayer.h || boxLayer.c != borderColor) {
+						boxHeight > boxLayer.h || boxLayer.c != borderColor ||
+						oldInnerDivHeight != innerDiv.offsetHeight ) {
 				    boxLayer.clear();		
 				    boxLayer.drawRect(
 						borderWidth / 2, 
@@ -3026,13 +3036,18 @@ function Chart (options) {
 		
 	// create the container
 	// todo: move this to render and don't render anything to the container before that
-	var renderTo = optionsChart.renderTo;
-	if (typeof renderTo == 'string') renderTo = doc.getElementById(optionsChart.renderTo);
+	var renderTo = optionsChart.renderTo,
+		containerId;
+	if (typeof renderTo == 'string') {
+		containerId = renderTo;
+		renderTo = doc.getElementById(renderTo);
+	}
 	renderTo.innerHTML = '';
 	var chartWidth = optionsChart.width || renderTo.offsetWidth || 400,
 		chartHeight = optionsChart.height || renderTo.offsetHeight || 300,
 		container = createElement(DIV, {
-				className: 'highcharts-container'
+				className: 'highcharts-container',
+				id: containerId || 'highcharts-'+ idCounter++
 			}, extend({
 				position: RELATIVE,
 				overflow: HIDDEN,
@@ -3086,7 +3101,8 @@ function Chart (options) {
 	
 	// Update position on resize and scroll
 	addEvent(win, 'resize', function() {
-		position = getPosition(container);
+		var container = doc.getElementById(containerId);
+		if (container) position = getPosition(container);
 	});
 	
 	// Chart event handlers
@@ -3191,13 +3207,11 @@ var Point = function(series, options, i) {
 		// set x and y
 		this.x = (options.x === undefined ? i : options.x);
 		this.y = options.y;
+		this.options = options;
 	}
 	
 	// categorized data with name in first position
 	else if (typeof options[0] == 'string') {
-		/*options.name = options[0];
-		options[0] = i;
-		ret = options;*/
 		this.name = options[0];
 		this.x = i;
 		this.y = options[1];
@@ -3233,8 +3247,10 @@ Point.prototype = {
 		if (!this.hasImportedEvents) {
 			var point = this,
 				options = merge (point.series.options.point, point.options),
-				events = point.events = options.events,
+				events = options.events,
 				eventType;
+				
+			point.events = events;
 			
 			for (eventType in events) {
 				addEvent(point, eventType, events[eventType]);
@@ -3402,18 +3418,17 @@ LineSeries.prototype = {
 			if (stacking) {
 				pointStack = stack[xValue];
 				pointStackTotal = pointStack.total;
-				yBottom = pointStack.cum = 
-					pointStack.cum - yValue; // start from top
-				yValue = yBottom + yValue;
 				
+				pointStack.cum = yBottom = pointStack.cum - yValue; // start from top
+				yValue = yBottom + yValue;
 				if (stacking == 'percent') {
 					yBottom = pointStackTotal ? yBottom * 100 / pointStackTotal : 0;
 					yValue = pointStackTotal ? yValue * 100 / pointStackTotal : 0;
 					point.percentage = pointStackTotal ? point.y * 100 / pointStackTotal : 0;
 				}
-				point.yBottom = yAxis.translate(yBottom, 0, 1);
-				
+				point.yBottom = yAxis.translate(yBottom, 0, 1);				
 			}
+			
 			// set the y value
 			if (yValue !== null) 
 				point.plotY = yAxis.translate(yValue, 0, 1);
@@ -3426,6 +3441,7 @@ LineSeries.prototype = {
 			// some API data
 			point.category = categories && categories[point.x] !== undefined ? 
 				categories[point.x] : point.x;
+				
 		});
 		this.setTooltipPoints();
 	},
@@ -3491,10 +3507,10 @@ LineSeries.prototype = {
 			data = series.data, 
 			color = options.lineColor || series.color, 
 			fillColor = options.fillColor == 'auto' ? 
-				Color(series.color).setOpacity(options.fillOpacity || .75).get() : 
+				Color(series.color).setOpacity(options.fillOpacity || 0.75).get() : 
 				options.fillColor, 
 			inverted = chart.inverted, 
-			y0 = (inverted ? 0 : chart.chartHeight) - series.yAxis.translate(0);
+			y0 = (inverted ? 0 : chart.plotHeight) - series.yAxis.translate(0);
 		
 		// get state options
 		if (state) 
@@ -3598,7 +3614,7 @@ LineSeries.prototype = {
 		}
 		
 		if (markerOptions.enabled) {
-			each(data, function(point){
+			each(data, function(point){		
 				if (point.plotY !== undefined) 
 					series.drawMarker(
 						layer, 
@@ -4157,7 +4173,8 @@ var SplineSeries = extendClass( LineSeries, {
 			}
 			splinedata.push (num ? (new SplineHelper(croppedData)).get(num) : []);
 		});
-		return series.splinedata = splinedata;
+		series.splinedata = splinedata;
+		return splinedata;
 	}
 });
 
@@ -4307,7 +4324,6 @@ var ColumnSeries = extendClass(LineSeries, {
 			//pointY0 = plotWidth - chart.xAxis.translate(0),
 			translatedY0 = series.yAxis.translate(0);
 			
-				
 		// record the new values
 		each (data, function(point) {
 			point.plotX += pointX;
@@ -4315,37 +4331,6 @@ var ColumnSeries = extendClass(LineSeries, {
 			point.y0 = (inverted ? plotWidth : plotHeight) - translatedY0;
 			point.h = (point.yBottom || point.y0) - point.plotY;
 		});
-		
-		/*LineSeries.prototype.translate.apply(this);
-		
-		
-		// calculate the width and position of each column based on 
-		// the number of column series in the plot, the groupPadding
-		// and the pointPadding options
-		var series = this,
-			options = series.options,
-			chart = series.chart,
-			data = series.data,
-			categoryWidth = data[1].x - data[0].x,
-			groupPadding = categoryWidth * options.groupPadding,
-			groupWidth = categoryWidth - 2 * groupPadding,
-			pointOffsetWidth = groupWidth / chart.columnCount,
-			pointPadding = pointOffsetWidth * options.pointPadding,
-			pointWidth = pointOffsetWidth - 2 * pointPadding,
-			columnNumber = chart.options.xAxis.reversed ? chart.columnCount - 
-				series.columnNumber : series.columnNumber - 1,
-			pointX = -(categoryWidth / 2) + groupPadding + columnNumber *
-				pointOffsetWidth + pointPadding,
-			pointY0 = chart.plotWidth - series.xAxis.translate(0);
-				
-		// record the new values
-		each (data, function(point) {
-			point.plotX += pointX;
-			point.w = pointWidth;
-			point.plotY0 = chart[chart.inverted ? 'plotWidth' : 'plotHeight']  - series.yAxis.translate(0);
-			point.h = (point.yBottom || point.y0) - point.plotY;
-		});*/
-		
 	},
 	
 	drawLine: function() {
@@ -4362,7 +4347,8 @@ var ColumnSeries = extendClass(LineSeries, {
 			plot = chart.plot,
 			inverted = chart.inverted,
 			data = series.data,
-			layer = series.stateLayers[state];
+			layer = series.stateLayers[state],
+			h;
 			
 		// make ready for animation
 		if (doAnimation) this.animate(true);
@@ -4371,7 +4357,7 @@ var ColumnSeries = extendClass(LineSeries, {
 		each (data, function(point) {
 			h = point.h;
 			if (point.plotY !== undefined) layer.drawRect(
-				inverted ? chart.plotWidth - point.y0 : point.plotX,
+				inverted ? chart.plotWidth - point.plotY - point.h : point.plotX,
 				inverted ? chart.plotHeight - point.plotX - point.w : 
 					(point.h >= 0 ? point.plotY : point.plotY + point.h), // for negative bars, subtract h (Opera) 
 				inverted ? point.h : point.w, 
@@ -4379,7 +4365,7 @@ var ColumnSeries = extendClass(LineSeries, {
 				options.borderColor, 
 				options.borderWidth, 
 				options.borderRadius, 
-				series.color,
+				point.color || series.color,
 				options.shadow
 			);
 		});
@@ -4393,7 +4379,9 @@ var ColumnSeries = extendClass(LineSeries, {
 	drawPointState: function(point, state) {
 		// local vars
 		var series = this,
-			chart = series.chart,		
+			chart = series.chart,
+			seriesOptions = series.options,
+			pointOptions = point ? point.options : null,	
 			plot = chart.plot,
 			inverted = chart.inverted,
 			singlePointLayer = series.singlePointLayer; 
@@ -4407,10 +4395,14 @@ var ColumnSeries = extendClass(LineSeries, {
 			
 		
 		// draw the column
-		if (state && this.options.states[state]) {
-			var options = merge(this.options, this.options.states[state]);
+		if (state && seriesOptions.states[state]) {
+			var options = merge(
+				seriesOptions, 
+				seriesOptions.states[state],
+				pointOptions
+			);
 			singlePointLayer.drawRect(
-				inverted ? chart.plotWidth - point.y0 : point.plotX, 
+				inverted ? chart.plotWidth - point.plotY - point.h : point.plotX, 
 				inverted ? chart.plotHeight - point.plotX - point.w : point.plotY, 
 				inverted ? point.h : point.w, 
 				inverted ? point.w : point.h, 
@@ -4428,7 +4420,7 @@ var ColumnSeries = extendClass(LineSeries, {
 			chart = this.chart,
 			inverted = chart.inverted;
 		each (this.data, function(point) {
-			var x1 = inverted ? chart.plotWidth - point.y0 : point.plotX,
+			var x1 = inverted ? chart.plotWidth - point.plotY - point.h : point.plotX,
 				y2 = inverted ? chart.plotHeight - point.plotX - point.w  : point.plotY,
 				y1 = y2 + (inverted ? point.w : point.h),
 				x2 = x1 + (inverted ? point.h : point.w);
@@ -4506,7 +4498,7 @@ var PieSeries = extendClass(LineSeries, {
 	translate: function() {
 		var sum = 0,
 			series = this,
-			cumulative = -.25, // start at top
+			cumulative = -0.25, // start at top
 			options = series.options,
 			slicedOffset = options.slicedOffset,
 			positions = options.center,
@@ -4703,7 +4695,7 @@ var PieSeries = extendClass(LineSeries, {
 				
 			// start building the coordinates from the start point
 			// with .25 radians (~15 degrees) increments the coordinates
-			for (var angle = start; angle; angle += .25) {
+			for (var angle = start; angle; angle += 0.25) {
 				if (angle >= end) angle = end;
 				coords = coords.concat([
 					centerX + mathCos(angle) * radius,
