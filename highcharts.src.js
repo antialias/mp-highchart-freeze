@@ -1,41 +1,35 @@
 // ==ClosureCompiler==
 // @compilation_level SIMPLE_OPTIMIZATIONS
 /** 
- * @license Name:    Highcharts
- * Version: 1.2.0 (2010-02-23)
- * Author:  Vevstein Web
- * Support: www.highcharts.com/support
+ * @license Highcharts JS v1.2.5 (2010-04-13)
+ * 
+ * (c) 2010 Torstein Hønsi
+ * 
  * License: www.highcharts.com/license
  */
 
 /*
  * Roadmap
  * 
- * 1.3
+ * 2.0 (summer 2010)
+ * - Rewritten rendering engine to SVG/VML
  * - Save as image
  * - Print chart - open in a popup and call window.print.
  * - Improvements to the toolbar object to allow the two above
  * 
- * 1.4
+ * 2.1 (summer/autumn 2010)
  * - Logarithmic axis
  * - Built-in table parser
  * - Base value for column, bar and area series
- * - Automatic margin size based on axis label size. Anti-collision logic for labels.
+ * - Automatic margin size based on axis label size and legend. Anti-collision logic for labels.
  * - Floating columns and bars
  * - Candlestick charts
  * - Stock charts?
  * - Radar charts?
  * 
- * 1.5 
+ * 2.2 (autumn 2010)
  * - Improve pies: shadow, better dataLabels, 3D view.
- * 
  *
- * Known issues:
- * - FF2: Line graph disappearing when zooming in too closely. Open 
- *   http://highcharts.com/demo/?example=line-time-series&theme=default and zoom
- *   in to 6. June to 22. June.
- * - Safari: Flickering on mouseover on series. For some reason the area of a line series
- *   seems to extend to the left and right of each point.
  */
 
 
@@ -78,6 +72,20 @@ var
 	VISIBLE = 'visible',
 	PX = 'px',
 	
+	// time methods, changed based on whether or not UTC is used
+	makeTime,
+	getMinutes,
+	getHours,
+	getDay,
+	getDate,
+	getMonth,
+	getFullYear,
+	setMinutes,
+	setHours,
+	setDate,
+	setMonth,
+	setFullYear,
+	
 	// check for a custom HighchartsAdapter defined prior to this file
 	globalAdapter = win.HighchartsAdapter,
 	adapter = globalAdapter || {}, 
@@ -93,22 +101,29 @@ var
 	addEvent = adapter.addEvent,
 	fireEvent = adapter.fireEvent,
 	animate = adapter.animate,
-	getAjax = adapter.getAjax;
+	getAjax = adapter.getAjax,
+	
+	// lookup over the types and the associated classes
+	seriesTypes = {};
 	
 	
 // the jQuery adapter
 if (!globalAdapter && win.jQuery) {
 	var jQ = jQuery;
-	each = function(arr, fn){
-		for (var i = 0, len = arr.length; i < len; i++)
-			if (fn.call(arr[i], arr[i], i, arr) === false) return i;
-	}
+	each = function(arr, fn) {
+		for (var i = 0, len = arr.length; i < len; i++) {
+			if (fn.call(arr[i], arr[i], i, arr) === false) {
+				return i;
+			}
+		}
+	};
 	grep = jQ.grep;
 	map = function(arr, fn){
 		//return jQuery.map(arr, fn);
 		var results = [];
-		for (var i = 0, len = arr.length; i < len; i++) 
+		for (var i = 0, len = arr.length; i < len; i++) {
 			results[i] = fn.call(arr[i], arr[i], i, arr);
+		}
 		return results;
 		
 	}
@@ -327,6 +342,10 @@ function extend(a, b) {
  */
 function setOptions(options) {
 	defaultOptions = merge(defaultOptions, options);
+	
+	// apply UTC
+	setTimeMethods();
+	
 	return defaultOptions;
 }
 
@@ -368,7 +387,14 @@ defaultOptions = {
 		loading: 'Loading...',
 		months: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
 				'August', 'September', 'October', 'November', 'December'],
-		weekdays: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+		weekdays: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+		decimalPoint: '.',
+		resetZoom: 'Reset zoom',
+		resetZoomTitle: 'Reset zoom level 1:1',
+		thousandsSep: ','
+	},
+	global: {
+		useUTC: true
 	},
 	chart: {
 		//alignTicks: false,
@@ -517,6 +543,7 @@ defaultOptions = {
 			position: ABSOLUTE,
 			right: 0
 		},
+		//reversed: false, // docs
 		symbolWidth: 16,
 		symbolPadding: 5
 	},
@@ -540,9 +567,16 @@ defaultOptions = {
 	tooltip: {
 		enabled: true,
 		formatter: function() {
-			return '<b>'+ (this.point.name || this.series.name) +'</b><br/>'+
-				'X value: '+ this.x +'<br/>'+
-				'Y value: '+ this.y;
+			var pThis = this,
+				series = pThis.series,
+				xAxis = series.xAxis,
+				x = pThis.x;
+			return '<b>'+ (pThis.point.name || series.name) +'</b><br/>'+
+				(defined(x) ? 
+					'X value: '+ (xAxis && xAxis.options.type == 'datetime' ? 
+						dateFormat('%Y-%m-%d %H:%M:%S', x) : x) +'<br/>':
+					'')+
+				'Y value: '+ pThis.y;
 		},
 		backgroundColor: 'rgba(255, 255, 255, .85)',
 		borderWidth: 2,
@@ -769,6 +803,9 @@ defaultPlotOptions.pie = merge(defaultSeriesOptions, {
 	
 });
 
+// set the default time methods
+setTimeMethods();
+
 
 // class-like inheritance
 function extendClass(parent, members) {
@@ -880,14 +917,23 @@ function setStyles (el, styles) {
 	extend(el.style, styles);
 
 };
+
+/**
+ * Format a number and return a string based on input settings
+ * @param {Number} number The input number to format
+ * @param {Number} decimals The amount of decimals
+ * @param {String} decPoint The decimal point, defaults to the one given in the lang options
+ * @param {String} thousandsSep The thousands separator, defaults to the one given in the lang options
+ */
 function numberFormat (number, decimals, decPoint, thousandsSep) {
-	// http://kevin.vanzonneveld.net/techblog/article/javascript_equivalent_for_phps_number_format/
-	var n = number, c = isNaN(decimals = mathAbs(decimals)) ? 2 : decimals,
-    	d = decPoint === undefined ? "." : decPoint,
-    	t = thousandsSep === undefined ? "," : thousandsSep, s = n < 0 ? "-" : "",
+	var lang = defaultOptions.lang,
+		// http://kevin.vanzonneveld.net/techblog/article/javascript_equivalent_for_phps_number_format/
+		n = number, c = isNaN(decimals = mathAbs(decimals)) ? 2 : decimals,
+    	d = decPoint === undefined ? lang.decimalPoint : decPoint,
+    	t = thousandsSep === undefined ? lang.thousandsSep : thousandsSep, s = n < 0 ? "-" : "",
     	i = parseInt(n = mathAbs(+n || 0).toFixed(c)) + "", j = (j = i.length) > 3 ? j % 3 : 0;
     
-    return s + (j ? i.substr(0, j) + t : "") + i.substr(j).replace(/(\d{3})(?=\d)/g, "$1" + t) +
+	return s + (j ? i.substr(0, j) + t : "") + i.substr(j).replace(/(\d{3})(?=\d)/g, "$1" + t) +
 		(c ? d + mathAbs(n - i).toFixed(c).slice(2) : "");
 };
 
@@ -904,12 +950,15 @@ function dateFormat(format, timestamp, capitalize) {
 	
 	if (!defined(timestamp)) return 'Invalid date';
 	
+	
 	var date = new Date(timestamp * timeFactor),
-		hours = date.getUTCHours(),
-		day = date.getUTCDay(),
-		dayOfMonth = date.getUTCDate(),
-		month = date.getUTCMonth(),
-		fullYear = date.getUTCFullYear(),
+	
+		// get the basic time values
+		hours = date[getHours](),
+		day = date[getDay](),
+		dayOfMonth = date[getDate](),
+		month = date[getMonth](),
+		fullYear = date[getFullYear](),
 		lang = defaultOptions.lang,
 		langWeekdays = lang.weekdays,
 		langMonths = lang.months,
@@ -938,10 +987,10 @@ function dateFormat(format, timestamp, capitalize) {
 			'H': pad(hours), // Two digits hours in 24h format, 00 through 23
 			'I': pad((hours % 12) || 12), // Two digits hours in 12h format, 00 through 11
 			'l': (hours % 12) || 12, // Hours in 12h format, 1 through 12
-			'M': pad(date.getUTCMinutes()), // Two digits minutes, 00 through 59
+			'M': pad(date[getMinutes]()), // Two digits minutes, 00 through 59
 			'p': hours < 12 ? 'AM' : 'PM', // Upper case AM or PM
 			'P': hours < 12 ? 'am' : 'pm', // Lower case AM or PM
-			'S': pad(date.getUTCSeconds()) // Two digits seconds, 00 through  59
+			'S': pad(date.getSeconds()) // Two digits seconds, 00 through  59
 			
 		};
 
@@ -953,7 +1002,42 @@ function dateFormat(format, timestamp, capitalize) {
 	return capitalize ? format.substr(0, 1).toUpperCase() + format.substr(1) : format;
 };
 
-function updatePosition (el)	{
+/**
+ * Set the time methods globally based on the useUTC option. Time method can be either 
+ * local time or UTC (default).
+ */
+function setTimeMethods() {
+	var useUTC = defaultOptions.global.useUTC;
+	
+	makeTime = useUTC ? Date.UTC : function(year, month, date, hours, minutes, seconds) {
+		return new Date(
+			year, 
+			month, 
+			pick(date, 1), 
+			pick(hours, 0), 
+			pick(minutes, 0), 
+			pick(seconds, 0)
+		).getTime();
+	};
+	getMinutes = useUTC ? 'getUTCMinutes' : 'getMinutes';
+	getHours = useUTC ? 'getUTCHours' : 'getHours';
+	getDay = useUTC ? 'getUTCDay' : 'getDay';
+	getDate = useUTC ? 'getUTCDate' : 'getDate';
+	getMonth = useUTC ? 'getUTCMonth' : 'getMonth';
+	getFullYear = useUTC ? 'getUTCFullYear' : 'getFullYear';
+	setMinutes = useUTC ? 'setUTCMinutes' : 'setMinutes';
+	setHours = useUTC ? 'setUTCHours' : 'setHours';
+	setDate = useUTC ? 'setUTCDate' : 'setDate';
+	setMonth = useUTC ? 'setUTCMonth' : 'setMonth';
+	setFullYear = useUTC ? 'setUTCFullYear' : 'setFullYear';
+		
+};
+
+/**
+ * Return the absolute page position of an element
+ * @param {Object} el
+ */
+function getPosition (el)	{
 	var p = { x: el.offsetLeft, y: el.offsetTop };
 	while (el.offsetParent)	{
 		el = el.offsetParent;
@@ -966,6 +1050,7 @@ function updatePosition (el)	{
 	}
 	return p;
 }
+
 
 var Layer = function (name, appendTo, props, styles) {
 	var layer = this,
@@ -1000,8 +1085,7 @@ var Layer = function (name, appendTo, props, styles) {
 		+'px" height="'+ layer.height +'">';
 			
 	// save it for later
-	layer.basicSvg = layer.svg;
-	
+	layer.basicSvg = layer.svg;	
 }
 Layer.prototype = {
 	getCtx: function() {
@@ -1019,8 +1103,9 @@ Layer.prototype = {
 				cvs = doc.getElementById(cvs.id);
 			}
 		
-			this.ctx = cvs.getContext('2d');
+			this.ctx = cvs.getContext('2d');			
 		}
+		
 		return this.ctx;
 	},
 	getSvg: function() {
@@ -1074,7 +1159,8 @@ Layer.prototype = {
 		ctx.strokeStyle = color;
 		ctx.lineTo(x2, y2);
 		ctx.closePath();
-		ctx.stroke();	},
+		ctx.stroke();
+	},
 	
 	drawPolyLine: function(points, color, width, shadow, fillColor) {
 		var ctx = this.getCtx(),
@@ -1113,8 +1199,9 @@ Layer.prototype = {
 		
 	},
 	drawRect: function(x, y, w, h, color, width, radius, fill, shadow, image) {
-	// must (?) be done twice to apply both stroke and fill in excanvas
+		// must (?) be done twice to apply both stroke and fill in excanvas
 		var drawPath = function() {
+			var ret;
 			if (w > 0 && h > 0) { // zero or negative dimensions break Opera 10
 				ctx.beginPath();
 				if (!radius) {
@@ -1131,7 +1218,9 @@ Layer.prototype = {
 					ctx.quadraticCurveTo(x , y, x, y + radius);
 				}
 				ctx.closePath();
+				ret = true;
 			}
+			return ret;
 		};
 		
 		var ctx = this.getCtx(), normalizer = (width || 0) % 2 / 2;
@@ -1152,18 +1241,18 @@ Layer.prototype = {
 		// apply the background image behind everything
 		if (image) ctx.drawImage(image, x, y, w, h);
 		
-		drawPath();
-		
-		if (fill) {
-			ctx.fillStyle = setColor(fill, ctx);
-			ctx.fill();
-			// draw path again
-			if (win.G_vmlCanvasManager) drawPath();
-		}
-		if (width) {
-			ctx.strokeStyle = setColor(color, ctx);
-			ctx.lineWidth = width;
-			ctx.stroke();
+		if (drawPath()) {
+			if (fill) {
+				ctx.fillStyle = setColor(fill, ctx);
+				ctx.fill();
+				// draw path again
+				if (win.G_vmlCanvasManager) drawPath();
+			}
+			if (width) {
+				ctx.strokeStyle = setColor(color, ctx);
+				ctx.lineWidth = width;
+				ctx.stroke();
+			}
 		}
 
 	},
@@ -1454,7 +1543,7 @@ Layer.prototype = {
 		// remove all spans
 		for (var i = childNodes.length - 1; i >= 0; i--) {
 			node = childNodes[i];			
-			if (node.tagName == 'SPAN') discardElement(node);
+			if (/(SPAN|IMG)/.test(node.tagName)) discardElement(node);
 		} 
 		
 	},
@@ -1470,7 +1559,7 @@ Layer.prototype = {
 		/*var shapes = this.div.getElementsByTagName('shape');
 		each (shapes, function(shape) {
 			//shape.style.filter = 'alpha(opacity=59)';
-			console.log((new Color(shape.FillColor)).setOpacity(0.5), shape.StrokeColor);
+			
 		})	
 		var layer = this;
 		setTimeout(function() {
@@ -1536,7 +1625,6 @@ function Chart (options) {
 		
 		// reset maxTicks
 		maxTicks = null;
-		
 		if (hasCartesianSeries) {
 			// set axes scales
 			each (axes, function(axis) {
@@ -1552,13 +1640,13 @@ function Chart (options) {
 		
 		// redraw affected series
 		each (series, function(serie) {
-			if (serie.isDirty) serie.redraw();
+			if (serie.isDirty && serie.visible) serie.redraw();
 		});
 		
 		// handle added or removed series 
 		if (redrawLegend) { // series or pie points are added or removed
 			// draw legend graphics
-			if (legend.renderHTML) {
+			if (legend && legend.renderHTML) {
 				legend.renderHTML(true);
 				legend.drawGraphics(true);
 			}
@@ -1567,7 +1655,7 @@ function Chart (options) {
 		}
 
 		// hide tooltip and hover states
-		tracker.resetTracker();			
+		if (tracker && tracker.resetTracker) tracker.resetTracker();			
 		
 		
 		// fire the event
@@ -1579,9 +1667,10 @@ function Chart (options) {
 	 */
 	function initSeries(options) {
 		var type = options.type || optionsChart.defaultSeriesType,
-			typeClass = typeClasses[type],
+			typeClass = seriesTypes[type],
 			serie,
 			hasRendered = chart.hasRendered;
+			
 			
 		// an inverted chart can't take a column series and vice versa
 		if (hasRendered) {
@@ -1593,9 +1682,12 @@ function Chart (options) {
 		
 		serie.init(chart, options);
 		
-		
+		// set internal chart properties
 		if (!hasRendered && serie.inverted) inverted = true;
+		if (serie.isCartesian) hasCartesianSeries = serie.isCartesian;
+		
 		series.push(serie);
+		
 		return serie;
 	}
 	
@@ -1676,6 +1768,17 @@ function Chart (options) {
 		return null;	
 	}
 	
+	/**
+	 * Update the chart's position after it has been moved, to match
+	 * the mouse positions with the chart
+	 */
+	function updatePosition() {
+		var container = doc.getElementById(containerId);
+		if (container) {
+			position = getPosition(container);
+		}
+	}
+	
 	/** 
 	 * Create the Axis instances based on the config options
 	 */
@@ -1747,9 +1850,10 @@ function Chart (options) {
 	 * @param {Object} event
 	 */
 	function zoom(event) {
+		var lang = defaultOptions.lang;
 		
 		// add button to reset selection
-		chart.toolbar.add('zoom', 'Reset zoom', 'Reset zoom level 1:1', function() {
+		chart.toolbar.add('zoom', lang.resetZoom, lang.resetZoomTitle, function() {
 			//zoom(false);
 			fireEvent(chart, 'selection', { resetSelection: true }, zoom);
 			chart.toolbar.remove('zoom');
@@ -1829,7 +1933,7 @@ function Chart (options) {
 		each(series, function(serie) {
 			serie.translate();
 			serie.setTooltipPoints();
-			if (options.tooltip.enabled) serie.createArea();
+			/*if (options.tooltip.enabled) */ serie.createArea();
 		});	
 		
 		chart.render = render;
@@ -1837,7 +1941,9 @@ function Chart (options) {
 		setTimeout(function() { // IE(7) needs timeout
 			render();
 			fireEvent(chart, 'load');
+			
 		}, 0); 
+		
 	}
 	
 	/**
@@ -1989,8 +2095,60 @@ function Chart (options) {
 		if (renderToClone) {
 			renderTo.appendChild(container);
 			discardElement(renderToClone);
-			position = updatePosition(container);
+			updatePosition()
 		}
+	};
+	
+	/**
+	 * Clean up memory usage
+	 */
+	function destroy() {
+		
+
+		/**
+		 * Clear certain attributes from the element
+		 * @param {Object} d
+		 */
+		function purge(d) {
+		    var a = d.attributes, i, l, n;
+		    if (a) {
+		        l = a.length;
+		        for (i = l - 1; i >= 0; i -= 1) {
+		            n = a[i].name;
+					
+					try {
+			            //if (typeof d[n] != 'object' && !/^(width|height)$/.test(n)) {
+						if (typeof d[n] == 'function') {
+							d[n] = null;
+			            }
+					} catch (e) {
+						// IE/excanvas produces errors on some of the properties
+					}
+					
+		        }
+		    }
+			
+		    a = d.childNodes;
+		    if (a) {
+		        l = a.length;
+		        for (i = l - 1; i >= 0; i--) {
+		            var node = d.childNodes[i];
+					purge(node);	
+					
+					if (!node.childNodes.length) discardElement(node);			
+		        }
+		    }
+			
+		}
+		
+		// destroy each series
+		each (series, function(serie) {
+			serie.destroy();
+		});
+		series = [];
+		
+		
+		purge(container);
 	};
 	
 	/**
@@ -2030,8 +2188,6 @@ function Chart (options) {
 			each(series, function(serie) {
 				run = false;
 				
-				// ignore hidden series if opted 
-				if (!serie.visible && optionsChart.ignoreHiddenSeries) return;
 				
 				// match this axis against the series' given or implicated axis
 				each(['xAxis', 'yAxis'], function(strAxis) {
@@ -2051,6 +2207,8 @@ function Chart (options) {
 						run = true;		
 					}
 				});
+				// ignore hidden series if opted 
+				if (!serie.visible && optionsChart.ignoreHiddenSeries) run = false;				
 				
 				if (run) {
 					
@@ -2071,7 +2229,6 @@ function Chart (options) {
 						}
 					} 
 					if (serie.isCartesian) { // line, column etc. need axes, pie doesn't
-						hasCartesianSeries = true;
 						each(serie.data, function(point, i) {
 							var pointX = point.x,
 								pointY = point.y;
@@ -2087,10 +2244,11 @@ function Chart (options) {
 							if (isXAxis) {
 								if (pointX > dataMax) dataMax = pointX;
 								else if (pointX < dataMin) 	dataMin = pointX;
+								
 							}
 							
 							// y axis
-							else {
+							else if (defined(pointY)) {
 								if (stacking) 
 									typeStack[pointX] = typeStack[pointX] ? typeStack[pointX] + pointY : pointY;
 								
@@ -2121,6 +2279,7 @@ function Chart (options) {
 					}
 				}
 			});
+			
 			
 		};
 	
@@ -2162,18 +2321,23 @@ function Chart (options) {
 					y1, 
 					x2, 
 					y2,
-					translatedValue = translate(value);
+					translatedValue = translate(value),
+					skip;
 					
 				x1 = x2 = translatedValue + transB;
 				y1 = y2 = chartHeight - translatedValue - transB;
-				if (horiz) { 
+				
+				if (horiz) { // horizontal axis, vertical plot line 
 					y1 = marginTop;
 					y2 = chartHeight - marginBottom;
-				} else {
+					if (x1 < marginLeft || x1 > marginLeft + plotWidth) skip = true;
+					
+				} else { // vertical axis, horizontal plot line
 					x1 = marginLeft;
-					x2 = chartWidth - marginRight;	
+					x2 = chartWidth - marginRight;
+					if (y1 < marginTop || y1 > marginTop + plotHeight) skip = true;
 				}
-				gridLayer.drawLine(x1, y1, x2, y2, color, width);
+				if (!skip) gridLayer.drawLine(x1, y1, x2, y2, color, width);
 				
 			}
 		};
@@ -2272,7 +2436,8 @@ function Chart (options) {
 		 */
 		function setDateTimeTickPositions() {
 			tickPositions = [];
-			var oneSecond = 1000 / timeFactor,
+			var useUTC = defaultOptions.global.useUTC,
+				oneSecond = 1000 / timeFactor,
 				oneMinute = 60000 / timeFactor,
 				oneHour = 3600000 / timeFactor,
 				oneDay = 24 * 3600000 / timeFactor,
@@ -2340,39 +2505,40 @@ function Chart (options) {
 				minYear, // used in months and years as a basis for Date.UTC()
 				minDate = new Date(min * timeFactor);
 				
-			minDate.setUTCMilliseconds(0);
+				
+			minDate.setMilliseconds(0);
 			
 			if (interval >= oneSecond) // second
-				minDate.setUTCSeconds(interval >= oneMinute ? 0 :
-					multitude * mathFloor(minDate.getUTCSeconds() / multitude));
+				minDate.setSeconds(interval >= oneMinute ? 0 :
+					multitude * mathFloor(minDate.getSeconds() / multitude));
 	
 			if (interval >= oneMinute) // minute
-				minDate.setUTCMinutes(interval >= oneHour ? 0 :
-					multitude * mathFloor(minDate.getUTCMinutes() / multitude));
+				minDate[setMinutes](interval >= oneHour ? 0 :
+					multitude * mathFloor(minDate[getMinutes]() / multitude));
 	
 			if (interval >= oneHour) // hour
-				minDate.setUTCHours(interval >= oneDay ? 0 :
-					multitude * mathFloor(minDate.getUTCHours() / multitude));
+				minDate[setHours](interval >= oneDay ? 0 :
+					multitude * mathFloor(minDate[getHours]() / multitude));
 	
 			if (interval >= oneDay) // day
-				minDate.setUTCDate(interval >= oneMonth ? 1 :
-					multitude * mathFloor(minDate.getUTCDate() / multitude));
+				minDate[setDate](interval >= oneMonth ? 1 :
+					multitude * mathFloor(minDate[getDate]() / multitude));
 					
 			if (interval >= oneMonth) { // month
-				minDate.setUTCMonth(interval >= oneYear ? 0 :
-					multitude * mathFloor(minDate.getUTCMonth() / multitude));
-				minYear = minDate.getUTCFullYear();
+				minDate[setMonth](interval >= oneYear ? 0 :
+					multitude * mathFloor(minDate[getMonth]() / multitude));
+				minYear = minDate[getFullYear]();
 			}
 			
 			if (interval >= oneYear) { // year
 				minYear -= minYear % multitude;
-				minDate.setUTCFullYear(minYear);
+				minDate[setFullYear](minYear);
 			}
 			
 			// week is a special case that runs outside the hierarchy
 			if (interval == oneWeek) {
 				// get start of current week, independent of multitude
-				minDate.setUTCDate(minDate.getUTCDate() - minDate.getUTCDay() + 
+				minDate[setDate](minDate[getDate]() - minDate[getDay]() + 
 					options.startOfWeek);
 			}	
 			
@@ -2380,21 +2546,28 @@ function Chart (options) {
 			// get tick positions
 			var i = 1, // prevent crash just in case
 				time = minDate.getTime() / timeFactor,
-				minYear = minDate.getUTCFullYear(),
-				minMonth = minDate.getUTCMonth();
+				minYear = minDate[getFullYear](),
+				minMonth = minDate[getMonth](),
+				minDateDate = minDate[getDate]();
 				
-			//min = time;
+			// iterate and add tick positions at appropriate values
 			while (time < max && i < plotWidth) {
 				tickPositions.push(time);
 				
 				// if the interval is years, use Date.UTC to increase years
 				if (interval == oneYear) {
-					time = Date.UTC(minYear + i * multitude, 0) / timeFactor;
+					time = makeTime(minYear + i * multitude, 0) / timeFactor;
 				
 				// if the interval is months, use Date.UTC to increase months
 				} else if (interval == oneMonth) {
-					time = Date.UTC(minYear, minMonth + i * multitude) / timeFactor;
-				
+					time = makeTime(minYear, minMonth + i * multitude) / timeFactor;
+					
+				// if we're using global time, the interval is not fixed as it jumps
+				// one hour at the DST crossover
+				} else if (!useUTC && (interval == oneDay || interval == oneWeek)) {
+					time = makeTime(minYear, minMonth, minDateDate + 
+						i * multitude * (interval == oneDay ? 1 : 7));
+					
 				// else, the interval is fixed and we use simple addition
 				} else {
 					time += interval * multitude;
@@ -2402,14 +2575,13 @@ function Chart (options) {
 				
 				i++;
 			}
-			//max = time;
+			// push the last time
 			tickPositions.push(time);
 			
 			// dynamic label formatter 
 			if (!options.labels.formatter) labelFormatter = function() {
 				return dateFormat(options.dateTimeLabelFormats[unit[0]], this.value, 1);
 			}
-			
 		}
 			
 			
@@ -2419,7 +2591,8 @@ function Chart (options) {
 		function setLinearTickPositions() {
 			
 			var correctFloat = function(num) { // JS round off float errors
-					var invMag = (magnitude < 1 ? 1 / magnitude : 1) * 10;					
+					var invMag = (magnitude < 1 ? mathRound(1 / magnitude) : 1) * 10;
+					
 					return mathRound(num * invMag) / invMag
 				},
 				
@@ -2480,7 +2653,7 @@ function Chart (options) {
 				max = roundedMax;
 			} else if (max < roundedMax) {
 				tickPositions.pop();
-			}			
+			}	
 		}
 		
 		/**
@@ -2518,9 +2691,10 @@ function Chart (options) {
 				oldMax = max,
 				maxZoom = options.maxZoom,
 				zoomOffset;
-				
+			
 			// get data extremes if needed
 			getSeriesExtremes();
+			
 			
 			// initial min and max from the extreme data values
 			min = pick(userSetMin, options.min, dataMin);
@@ -2529,8 +2703,9 @@ function Chart (options) {
 			// maxZoom exceeded, just center the selection
 			if (max - min < maxZoom) { 
 				zoomOffset = (maxZoom - max + min) / 2;
-				min -= zoomOffset;
-				max += zoomOffset;
+				// if min and max options have been set, don't go beyond it
+				min = mathMax(min - zoomOffset, pick(options.min, min - zoomOffset));
+				max = math.min(min + maxZoom, pick(options.max, min + maxZoom));
 			}
 				
 			// pad the values to get clear of the chart's edges
@@ -2548,7 +2723,7 @@ function Chart (options) {
 					(max - min) * options.tickPixelInterval / axisLength : 
 					options.tickInterval;
 					
-			if (!isDatetimeAxis) // linear
+			if (!isDatetimeAxis && options.tickInterval == 'auto') // linear
 				tickInterval = normalizeTickInterval(tickInterval);
 			
 			// minorTickInterval
@@ -2622,6 +2797,17 @@ function Chart (options) {
 			
 		};
 		
+		/**
+		 * Set new axis categories and optionally redraw
+		 * @param {Array} newCategories
+		 * @param {Boolean} doRedraw
+		 */
+		function setCategories(newCategories, doRedraw) {
+				categories = newCategories;
+				if (pick(doRedraw, true)) redraw();
+		};
+		
+		
 		/* *
 		 * Reset min and max and set the scale again from data min and max
 		 * /
@@ -2681,7 +2867,7 @@ function Chart (options) {
 		function redraw() {
 			
 			// hide tooltip and hover states
-			tracker.resetTracker();
+			if (tracker.resetTracker) tracker.resetTracker();
 		
 			// render the axis
 			render();
@@ -2700,7 +2886,8 @@ function Chart (options) {
 				lineWidth = options.lineWidth,
 				lineLeft,
 				lineTop,
-				tickmarkPos;
+				tickmarkPos,
+				hasData = associatedSeries.length && defined(min) && defined(max);
 			
 			
 			// clear the axis layers before new grid and ticks are drawn
@@ -2708,64 +2895,67 @@ function Chart (options) {
 			gridLayer.clear();
 			
 			// return if there's no series on this axis
-			if (!associatedSeries.length || !defined(min) || !defined(max)) return;
+			//if (!associatedSeries.length || !defined(min) || !defined(max)) return;
 			
-			// alternate grid color
-			if (alternateGridColor) {
-				each(tickPositions, function(pos, i) {
-					if (i % 2 == 0 && pos < max) {
-						drawPlotBand(
-							pos, 
-							tickPositions[i + 1] !== undefined ? tickPositions[i + 1] : max, 
-							alternateGridColor
-						);
-					}
+			// If the series has data draw the ticks. Else only the line and title
+			if (hasData) {
+			
+				// alternate grid color
+				if (alternateGridColor) {
+					each(tickPositions, function(pos, i) {
+						if (i % 2 == 0 && pos < max) {
+							drawPlotBand(
+								pos, 
+								tickPositions[i + 1] !== undefined ? tickPositions[i + 1] : max, 
+								alternateGridColor
+							);
+						}
+					});
+				}
+				
+				// custom plot bands (behind grid lines)
+				each (plotBands, function(plotBand) {
+					drawPlotBand(plotBand.from, plotBand.to, plotBand.color);
 				});
-			}
-			
-			// custom plot bands (behind grid lines)
-			each (plotBands, function(plotBand) {
-				drawPlotBand(plotBand.from, plotBand.to, plotBand.color);
-			});
-			
-			// minor grid lines
-			if (minorTickInterval && !categories) for (var i = min; i <= max; i += minorTickInterval) {
-				drawPlotLine(i, options.minorGridLineColor, options.minorGridLineWidth);
-				if (minorTickWidth) addTick(
-					i, 
-					options.minorTickPosition, 
-					options.minorTickColor, 
-					minorTickWidth, 
-					options.minorTickLength
-				);
-			}
-			// grid lines and tick marks
-			each(tickPositions, function(pos, index) {
-				tickmarkPos = pos + tickmarkOffset;
 				
-				// add the grid line
-				drawPlotLine(tickmarkPos, options.gridLineColor, options.gridLineWidth);
+				// minor grid lines
+				if (minorTickInterval && !categories) for (var i = min; i <= max; i += minorTickInterval) {
+					drawPlotLine(i, options.minorGridLineColor, options.minorGridLineWidth);
+					if (minorTickWidth) addTick(
+						i, 
+						options.minorTickPosition, 
+						options.minorTickColor, 
+						minorTickWidth, 
+						options.minorTickLength
+					);
+				}
+				// grid lines and tick marks
+				each(tickPositions, function(pos, index) {
+					tickmarkPos = pos + tickmarkOffset;
+					
+					// add the grid line
+					drawPlotLine(tickmarkPos, options.gridLineColor, options.gridLineWidth);
+					
+					// add the tick mark
+					addTick(
+						pos, 
+						options.tickPosition, 
+						options.tickColor, 
+						options.tickWidth, 
+						options.tickLength, 
+						!((pos == min && !options.showFirstLabel) || (pos == max && !options.showLastLabel)),
+						index
+					);
+				});
+			
+			
 				
-				// add the tick mark
-				addTick(
-					pos, 
-					options.tickPosition, 
-					options.tickColor, 
-					options.tickWidth, 
-					options.tickLength, 
-					!((pos == min && !options.showFirstLabel) || (pos == max && !options.showLastLabel)),
-					index
-				);
-			});
-		
-		
+				// custom plot lines (in front of grid lines)
+				each (plotLines, function(plotLine) {
+					drawPlotLine(plotLine.value, plotLine.color, plotLine.width);
+				});
 			
-			// custom plot lines (in front of grid lines)
-			each (plotLines, function(plotLine) {
-				drawPlotLine(plotLine.value, plotLine.color, plotLine.width);
-			});
-			
-			
+			} // end if hasData
 			
 			// axis line
 			if (lineWidth) {
@@ -2895,6 +3085,7 @@ function Chart (options) {
 		// negate offset
 		if (!opposite) offset *= -1;
 		if (horiz) offset *= -1; 
+		
 			
 		// expose some variables
 		extend (axis, {
@@ -2908,6 +3099,7 @@ function Chart (options) {
 			render: render,
 			setExtremes: setExtremes,
 			setScale: setScale,
+			setCategories: setCategories,
 			translate: translate,
 			redraw: redraw,
 			removePlotBand: removePlotBandOrLine,
@@ -3062,8 +3254,8 @@ function Chart (options) {
 						border: 'none',
 						background: '#4572A7',
 						opacity: 0.25,
-						width: zoomX ? 0 : plotWidth + PX,
-						height: zoomY ? 0 : plotHeight + PX
+						width: zoomHor ? 0 : plotWidth + PX,
+						height: zoomVert ? 0 : plotHeight + PX
 					});
 					plotLayer.div.appendChild(selectionMarker);
 				}
@@ -3098,7 +3290,7 @@ function Chart (options) {
 					) > 10;
 					
 					// adjust the width of the selection marker
-					if (zoomX) {
+					if (zoomHor) {
 						var xSize = e.pageX - mouseDownX;
 						setStyles(selectionMarker, {
 							width: mathAbs(xSize) + PX,
@@ -3107,7 +3299,7 @@ function Chart (options) {
 						});
 					}
 					// adjust the height of the selection marker
-					if (zoomY) {
+					if (zoomVert) {
 						var ySize = e.pageY - mouseDownY;
 						setStyles(selectionMarker, {
 							height: mathAbs(ySize) + PX,
@@ -3180,23 +3372,26 @@ function Chart (options) {
 						each (axes, function(axis, i) {
 							var translate = axis.translate,
 								isXAxis = axis.isXAxis,
-								isHorizontal = inverted ? !isXAxis : isXAxis;
-								
-							selectionData[isXAxis ? 'xAxis' : 'yAxis'].push({
-								axis: axis,
-								min: translate(
+								isHorizontal = inverted ? !isXAxis : isXAxis,
+								selectionMin = translate(
 									isHorizontal ? 
 										selectionLeft : 
 										plotHeight - selectionTop - selectionHeight, 
 									true
 								),
-								max: translate(
+								selectionMax = translate(
 									isHorizontal ? 
 										selectionLeft + selectionWidth : 
 										plotHeight - selectionTop, 
 									true
-								)								
-							})
+								);
+								
+							selectionData[isXAxis ? 'xAxis' : 'yAxis'].push({
+								axis: axis,
+								min: math.min(selectionMin, selectionMax), // for reversed axes
+								max: mathMax(selectionMin, selectionMax)
+							});
+							
 						});
 						fireEvent(chart, 'selection', selectionData, zoom);
 
@@ -3214,15 +3409,7 @@ function Chart (options) {
 				}*/
 			};
 			
-			/* MooTools 1.2.4 doesn't handle this 'mouseleave' in IE
-			addEvent(imagemap, 'mouseleave', function() {
-				tooltip.hide();
-				if (chart.hoverSeries) {
-					chart.hoverSeries.setState();
-					chart.hoverSeries = null;
-					activePoint = null;
-				}
-			});*/
+			// MooTools 1.2.4 doesn't handle this 'mouseleave' in IE
 			imagemap.onmouseout = function(e) {
 				e = e || win.event;
 				var	related = e.relatedTarget || e.toElement;
@@ -3311,7 +3498,7 @@ function Chart (options) {
 					point.firePointEvent('mouseOver');
 
 					// refresh the tooltip
-					tooltip.refresh(point);
+					if (tooltip) tooltip.refresh(point);
 					activePoint = point;
 					
 					
@@ -3363,7 +3550,7 @@ function Chart (options) {
 		 */
 		function resetTracker() {
 			// hide the tooltip
-			tooltip.hide();
+			if (tooltip) tooltip.hide();
 			
 			// hide the hovered series and point
 			if (chart.hoverSeries) {
@@ -3391,7 +3578,7 @@ function Chart (options) {
 			imagemap.insertBefore(area, childNodes[before]);				
 		}
 		
-		if (!options.enabled) return;
+		//if (!options.enabled) return;
 		
 		// Run MouseTracker
 		var activePoint,
@@ -3403,12 +3590,16 @@ function Chart (options) {
 			dragPointCoordinates,
 			allowXDrag,
 			allowYDrag,*/
-			zoomX = /x/.test(chart.options.chart.zoomType),
-			zoomY = /y/.test(chart.options.chart.zoomType);
+			zoomType = optionsChart.zoomType,
+			zoomX = /x/.test(zoomType),
+			zoomY = /y/.test(zoomType),
+			zoomHor = zoomX && !inverted || zoomY && inverted,
+			zoomVert = zoomY && !inverted || zoomX && inverted;
+			
 			
 		// public
 		createImageMap();
-		chart.tooltip = tooltip = Tooltip(options);
+		if (options.enabled) chart.tooltip = tooltip = Tooltip(options);
 		
 		setDOMEvents();
 		
@@ -3447,7 +3638,9 @@ function Chart (options) {
 			topRule = '#'+ container.id +' .highcharts-legend li', // apply once for each chart
 			allItems = [],
 			legendLayer = new Layer('legend', container, null, { zIndex: 7 }),
-			legendArea;
+			legendArea,
+			series = chart.series,
+			reversedLegend = options.reversed;
 			
 		
 		// Don't use Layer prototype because this needs to sit above the chart in zIndex
@@ -3480,7 +3673,10 @@ function Chart (options) {
 			}
 
 			// add HTML for each series
-			each(chart.series, function(serie) {
+			if (reversedLegend) {
+				series.reverse();
+			} 
+			each(series, function(serie) {
 				if (!serie.options.showInLegend) return;
 				
 				// use points or series for the legend item depending on legendType
@@ -3548,6 +3744,9 @@ function Chart (options) {
 					allItems.push(item);
 				});
 			});
+			if (reversedLegend) {
+				series.reverse();
+			}
 		}
 		
 		
@@ -3648,7 +3847,7 @@ function Chart (options) {
 						e = e || win.event;
 						var	relatedTarget = e.relatedTarget || e.fromElement;
 						if (relatedTarget != dom && !mouseIsDown) {
-							tooltip.hide();
+							if (tooltip) tooltip.hide();
 							setStyles(dom, {
 								zIndex: 10
 							});
@@ -3699,7 +3898,7 @@ function Chart (options) {
 				className: "highcharts-tooltip"
 			}, extend(options.style, {
 				maxWidth: (chartWidth - 40) + PX,
-				overflow: HIDDEN,
+				//overflow: HIDDEN, interferes with the text width detection
 				textOverflow: 'ellipsis',
 				position: RELATIVE,
 				zIndex: 2
@@ -3752,8 +3951,11 @@ function Chart (options) {
 				// Draw a rounded border. Draw the border with 20px extra width to minimize
 				// the need to redraw it later. Next time, only redraw if the width of the 
 				// box is more than 20px wider or smaller than the old box.
+				setStyles(innerDiv, { overflow: VISIBLE });
 				boxWidth = innerDiv.offsetWidth - borderWidth;
 				boxHeight = innerDiv.offsetHeight - borderWidth;
+				setStyles(innerDiv, { overflow: HIDDEN });
+				
 				if (boxWidth > (boxLayer.w || 0) + 20 || boxWidth < (boxLayer.w || 0) - 20 || 
 						boxHeight > boxLayer.h || boxLayer.c != borderColor ||
 						oldInnerDivHeight != innerDiv.offsetHeight ) {
@@ -3849,6 +4051,11 @@ function Chart (options) {
 	// Override defaults for inverted axis
 	/*if (options.chart && options.chart.inverted) defaultOptions = 
 		merge(defaultOptions, invertedDefaultOptions);*/
+	// Make sure the VML canvas manager is initialized. It initializes on doc.ready by default,
+	// which in some cases is too late for Highcharts.
+	if (win.G_vmlCanvasManager) {
+		win.G_vmlCanvasManager.init_(document);
+	}
 		
 	// Pull out the axis options to enable multiple axes
 	defaultXAxisOptions = merge(defaultXAxisOptions, defaultOptions.xAxis);
@@ -3882,6 +4089,7 @@ function Chart (options) {
 	// todo: move this to render and don't render anything to the container before that
 	getContainer();
 	
+	
 	var chart = this,
 		//container = doc.getElementById(optionsChart.renderTo),
 		//container,
@@ -3903,8 +4111,8 @@ function Chart (options) {
 		legend,
 		//xAxis, 
 		//yAxis,
-		position = updatePosition(container),
-		hasCartesianSeries,
+		position = getPosition(container),
+		hasCartesianSeries = optionsChart.showAxes,
 		axes = [],
 		maxTicks, // handle the greatest amount of ticks on grouped axes
 		series = [], 
@@ -3912,17 +4120,7 @@ function Chart (options) {
 		plotBackground,
 		inverted,
 		tooltipTick,
-		tooltipDiv,
-		typeClasses = { // lookup over the types and the associated classes
-			line: LineSeries,
-			spline: SplineSeries,
-			area: AreaSeries,
-			areaspline: AreaSplineSeries,
-			column: ColumnSeries,
-			bar: BarSeries,
-			pie: PieSeries,
-			scatter: ScatterSeries
-		};
+		tooltipDiv;
 		
 		
 	// Set to zero for each new chart
@@ -3930,10 +4128,10 @@ function Chart (options) {
 	symbolCounter = 0;
 	
 	// Update position on resize and scroll
-	addEvent(win, 'resize', function() {
-		var container = doc.getElementById(containerId);
-		if (container) position = updatePosition(container);
-	});
+	addEvent(win, 'resize', updatePosition);
+	
+	// Destroy the chart and free up memory
+	addEvent(win, 'unload', destroy);
 	
 	// Chart event handlers
 	if (chartEvents) for (eventType in chartEvents) { 
@@ -3952,6 +4150,7 @@ function Chart (options) {
 	
 	chart.options = options;
 	chart.series = series;
+	chart.container = container;
 	
 	chart.resources = {};
 	
@@ -3974,8 +4173,9 @@ function Chart (options) {
 	chart.showLoading = showLoading;
 	chart.hideLoading = hideLoading;
 	chart.get = get;
+	chart.destroy = destroy;
 	
-	chart.updatePosition = updatePosition;
+	chart.updatePosition = updatePosition; // docs
 	
 	chart.plotLayer = plotLayer = new Layer('plot', container, null, {
 		position: ABSOLUTE,
@@ -3987,7 +4187,6 @@ function Chart (options) {
 		zIndex: 3
 	});
 	
-	chart.tracker = tracker = new MouseTracker(chart, options.tooltip);
 	
 	// Wait for loading of plot area background
 	if (optionsChart.plotBackgroundImage) {
@@ -4001,10 +4200,16 @@ function Chart (options) {
 	
 	// Initialize the series
 	//initSeries();
-	each (options.series, function(serieOptions) {
+	each (options.series || [], function(serieOptions) {
 		initSeries(serieOptions);
 	});
+	
+	// Mouse tracker must be initiated after series because it depends on inverted
+	chart.tracker = tracker = new MouseTracker(chart, options.tooltip);
+	
+	
 	checkResources();
+	
 };
 
 /**
@@ -4074,6 +4279,16 @@ Point.prototype = {
 		 * x value, however the y value can be null to create a gap in the series
 		 */
 		if (point.x === undefined) point.x = series.autoIncrement();
+	},
+	
+	/**
+	 * Clear memory
+	 */
+	destroy: function() {
+		var point = this;
+		
+		if (point.stateLayer) point.stateLayer.destroy();
+		for (prop in point) point[prop] = null; 
 	},
 	
 	/**
@@ -4241,7 +4456,8 @@ Point.prototype = {
 			point: point,
 			x: point.category, 
 			y: point.y,
-			percentage: point.percentage
+			percentage: point.percentage,
+			total: point.stackTotal
 		});
 	}	
 };
@@ -4414,10 +4630,13 @@ Series.prototype = {
 				segments.push(data.slice(lastNull + 1, i + 1));
 			}
 		});
+		
+		
 		this.segments = segments;
 		
 		
 	},
+	
 	/**
 	 * Set the series options by merging from the options tree
 	 * @param {Object} options
@@ -4468,7 +4687,7 @@ Series.prototype = {
 	addPoint: function(options, redraw, shift) {
 		var series = this,
 			data = series.data,
-			point = (new Point()).init(series, options);
+			point = (new series.pointClass).init(series, options);
 			
 		redraw = pick(redraw, true);
 			
@@ -4501,6 +4720,7 @@ Series.prototype = {
 			//x += pointInterval;
 			//return point;
 		});
+		
 		// set the data
 		series.data = data;
 	
@@ -4512,25 +4732,6 @@ Series.prototype = {
 		if (pick(redraw, true)) series.chart.redraw();
 	},
 	
-	/*updatePoint: function(point, options) {
-		point.update(options);
-		
-	},*/
-	
-	/*
-	 * Update the series and if necessary the axes and other series to reflect
-	 * changes in the data points. This series' redraw method will be called from the axis
-	 * object together with other associated series.
-	 */
-	/*update: function() {
-		var series = this;
-		
-		series.isDirty = true; // means data is not in accordance with what the drawn graph
-		
-		// redraw the axes and all dirty series
-		series.chart.redrawAxes();
-		
-	},*/
 	
 	/**
 	 * Remove a series and optionally redraw the chart
@@ -4581,20 +4782,6 @@ Series.prototype = {
 	},
 	
 	/**
-	 * Redraw the series after an update in the axes.
-	 */
-	redraw: function() {
-		var series = this;
-			
-		series.translate();
-		
-		series.setTooltipPoints(true);
-		if (series.chart.options.tooltip.enabled) series.createArea();
-		series.clear();
-		series.render();
-	},
-	
-	/**
 	 * Translate data points from raw values 0 and 1 to x and y.
 	 */
 	translate: function() {
@@ -4615,7 +4802,7 @@ Series.prototype = {
 			point.plotX = series.xAxis.translate(point.x);
 			
 			// calculate the bottom y value for stacked series
-			if (stacking) {
+			if (stacking && series.visible && stack[xValue]) {
 				pointStack = stack[xValue];
 				pointStackTotal = pointStack.total;
 				pointStack.cum = yBottom = pointStack.cum - yValue; // start from top
@@ -4628,8 +4815,8 @@ Series.prototype = {
 				point.percentage = pointStackTotal ? point.y * 100 / pointStackTotal : 0;
 				point.stackTotal = pointStackTotal;
 				point.yBottom = yAxis.translate(yBottom, 0, 1);
-				
 			}
+			
 			// set the y value
 			if (yValue !== null) 
 				point.plotY = yAxis.translate(yValue, 0, 1);
@@ -4642,6 +4829,7 @@ Series.prototype = {
 			// some API data
 			point.category = categories && categories[point.x] !== undefined ? 
 				categories[point.x] : point.x;
+				
 				
 		});
 	},
@@ -4719,9 +4907,19 @@ Series.prototype = {
 		
 		// divide into segments
 		each(series.segments, function(segment){
-			var line = [], area = [];
+			var line = [], 
+				area = [];
+			
 			// get the points
-			each(segment, function(point){
+			each(segment, function(point, i) {
+				if (i && options.step) {
+					var lastPoint = segment[i - 1];
+					line.push (
+						inverted ? chart.plotWidth - lastPoint.plotY : point.plotX, 
+						inverted ? chart.plotHeight - point.plotX : lastPoint.plotY						
+					);
+				}
+
 				line.push(
 					inverted ? chart.plotWidth - point.plotY : point.plotX, 
 					inverted ? chart.plotHeight - point.plotX : point.plotY
@@ -4730,7 +4928,7 @@ Series.prototype = {
 			
 			// draw the area
 			if (/area/.test(series.type)) {
-				for (var i = 0; i < line.length; i++) 
+				for (i = 0; i < line.length; i++) 
 					area.push(line[i]);
 				if (options.stacking && series.type != 'areaspline') {
 					// follow stack back. Todo: implement areaspline
@@ -4741,9 +4939,9 @@ Series.prototype = {
 				} else { // follow zero line back
 					area.push(
 						inverted ? y0 : segment[segment.length - 1].plotX, 
-						inverted ? segment[0].plotX : y0, 
+						inverted ? chart.plotHeight - segment[segment.length - 1].plotX : y0, 
 						inverted ? y0 : segment[0].plotX, 
-						inverted ? segment[segment.length - 1].plotX : y0
+						inverted ? chart.plotHeight - segment[0].plotX : y0
 					);
 				}
 				layer.drawPolyLine(area, null, null, options.shadow, fillColor);
@@ -4859,7 +5057,7 @@ Series.prototype = {
 	/**
 	 * Draw the data labels
 	 */
-	drawDataLabels: function(){
+	drawDataLabels: function() {
 		if (this.options.dataLabels.enabled) {
 			var series = this, 
 				i, 
@@ -4869,7 +5067,7 @@ Series.prototype = {
 				options = series.options.dataLabels, 
 				color, 
 				str, 
-				dataLabelsLayer, 
+				dataLabelsLayer = series.dataLabelsLayer, 
 				chart = series.chart, 
 				inverted = chart.inverted,
 				seriesType = series.type,
@@ -4877,11 +5075,15 @@ Series.prototype = {
 				align;
 				
 			// create a separate layer for the data labels
-			series.dataLabelsLayer = dataLabelsLayer = new Layer('data-labels', 
-				series.layerGroup.div, 
-				null, {
-					zIndex: 1
-				});
+			if (dataLabelsLayer) {
+				dataLabelsLayer.clear();
+			} else {
+				series.dataLabelsLayer = dataLabelsLayer = new Layer('data-labels', 
+					series.layerGroup.div, 
+					null, {
+						zIndex: 1
+					});
+			}
 				
 			// determine the color
 			options.style.color = options.color == 'auto' ? series.color : options.color;
@@ -4920,6 +5122,7 @@ Series.prototype = {
 						center: point.w / 2,
 						right: point.w
 					}[align] || 0;
+					
 				
 				if (str) dataLabelsLayer[isPie ? 'drawText' : 'addText'](
 					str, 
@@ -4989,6 +5192,20 @@ Series.prototype = {
 	},
 	
 	/**
+	 * Clear DOM objects and free up memory
+	 */
+	destroy: function() {
+		var series = this,
+			prop;
+		
+		each (series.data, function(point) {
+			point.destroy();
+		});
+		
+		for (prop in series) series[prop] = null; 
+	},
+	
+	/**
 	 * Render the graph and markers
 	 */
 	render: function() {
@@ -4999,8 +5216,7 @@ Series.prototype = {
 		series.drawDataLabels();
 		if (series.visible) for (state in stateLayers) {
 			series.drawLine(state);
-			series.drawPoints(state);
-			
+			series.drawPoints(state);			
 		}
 		else series.setVisible(false, false);
 		
@@ -5013,6 +5229,21 @@ Series.prototype = {
 		series.isDirty = false; // means data is in accordance with what you see
 		
 	},
+	
+	/**
+	 * Redraw the series after an update in the axes.
+	 */
+	redraw: function() {
+		var series = this;
+		
+		series.translate();
+		series.setTooltipPoints(true);
+		/*if (series.chart.options.tooltip.enabled) */series.createArea();
+		series.clear();
+		
+		series.render();
+	},
+	
 	
 	/**
 	 * Clear all graphics and HTML from the series layer group
@@ -5070,16 +5301,17 @@ Series.prototype = {
 			legendItem = series.legendItem,
 			areas = series.areas,
 			oldVisibility = series.visible;
-
 		
 		// if called without an argument, toggle visibility
 		series.visible = vis = vis === undefined ? !oldVisibility : vis;
 		
-		
-		if (vis) 
+		if (vis) {
+			series.isDirty = true; // when series is initially hidden
+			
 			layerGroup.show();
-		else 
+		} else { 
 			layerGroup.hide();
+		}
 			
 		if (legendItem) { 
 			legendItem.className = vis ? '' : HIGHCHARTS_HIDDEN;
@@ -5097,14 +5329,15 @@ Series.prototype = {
 		
 		// rescale
 		if (chart.options.chart.ignoreHiddenSeries) {
+			
 			// in a stack, all other series are affected
 			if (series.options.stacking) each (chart.series, function(otherSeries) {
 				if (otherSeries.options.stacking && otherSeries.visible) 
 					otherSeries.isDirty = true;
 			}); 
 			
-			if (redraw !== false) chart.redraw();
 		}
+		if (redraw !== false) chart.redraw();
 		
 		fireEvent(series, vis ? 'show' : 'hide');
 	},
@@ -5152,8 +5385,10 @@ Series.prototype = {
 			inverted = chart.inverted, 
 			plotWidth = chart.plotWidth, 
 			plotHeight = chart.plotHeight, 
-			//reversedXAxis = series.xAxis.reversed,
-			snap = chart.options.tooltip.snap, 
+			reversedXAxis = series.xAxis.reversed,
+			reversedData,
+			snap = chart.options.tooltip.snap,
+			dataIsReverse,
 			i = 0, 
 			ret = [];
 		
@@ -5163,9 +5398,10 @@ Series.prototype = {
 			// Reverse the data in case of a reversed x axis. Spline data
 			// is already reversed at this point, so we need to actually
 			// inspect the data x values.
-			if (data.length > 1 && data[0].x > data[1].x) data = reverseArray(data);
-			
-			
+			reversedData = data.length > 1 && data[0].x > data[1].x;
+			if (reversedData && !reversedXAxis || reversedXAxis && !reversedData) {
+				data = data.reverse();
+			}
 			
 			var coords = [], outlineTop = [], outlineBottom = [];
 			each([outlineTop, outlineBottom], function(outline){
@@ -5182,9 +5418,10 @@ Series.prototype = {
 					if (data[i].plotX > data[last].plotX + snap || i == data.length - 1) {
 						extreme = data[i];
 						slice = data.slice(last, i - 1);
-						each(slice, function(point){
-							if (sign * point.plotY < sign * extreme.plotY) 
+						each(slice, function(point) {
+							if (sign * point.plotY < sign * extreme.plotY) {
 								extreme = point;
+							}
 						});
 						// push it only if we have moved on along the x axis
 						if (mathRound(data[last].plotX) < mathRound(extreme.plotX) ||
@@ -5196,11 +5433,12 @@ Series.prototype = {
 					}
 					i++;
 				}
-				//console.log(peaks);
 				
 				// push the last point
 				if (peaks[peaks.length - 1] != data[data.length-1])
 					peaks.push(data[data.length - 1]);
+					
+				
 				
 				// loop through the peaks and calculate rectangles {snap} pixels
 				// away from the peaks.
@@ -5302,14 +5540,14 @@ Series.prototype = {
 			}
 			
 			// single point: make circle
-			if (!coords.length && data[0]) {
+			if (!coords.length) {
 				coords.push(mathRound(data[0].plotX), mathRound(data[0].plotY));
 			}
 			
 			// visualize
 			//series.stateLayers[''].drawPolyLine(coords, '#afaf00', 1);
 			
-			ret.push([coords.join(',')]);
+			if (coords.length) ret.push([coords.join(',')]);
 			
 			// undo reverse
 			//if (reversedXAxis) data.reverse();
@@ -5341,7 +5579,7 @@ Series.prototype = {
 		})
 			
 		// create each area
-		each(coordsArray, function(coords){
+		each(coordsArray, function(coords) {
 			isCircle = /^[0-9]+,[0-9]+$/.test(coords[0]);
 			area = createElement('area', {
 				shape: isCircle ? 'circle' : 'poly',
@@ -5419,6 +5657,8 @@ Series.prototype = {
  * LineSeries object
  */
 var LineSeries = extendClass(Series);
+seriesTypes.line = LineSeries;
+	
 
 /**
  * AreaSeries object
@@ -5426,6 +5666,8 @@ var LineSeries = extendClass(Series);
 var AreaSeries = extendClass(Series, {
 	type: 'area'
 });
+seriesTypes.area = AreaSeries;
+		
 
 /**
  * SplineSeries object
@@ -5503,6 +5745,8 @@ var SplineSeries = extendClass( Series, {
 		return splinedata;
 	}
 });
+seriesTypes.spline = SplineSeries;
+		
 
 /**
  * Calculate the spine interpolation.
@@ -5606,6 +5850,8 @@ interpolate: function(xpoint) {
 var AreaSplineSeries = extendClass(SplineSeries, {
 	type: 'areaspline'
 });
+seriesTypes.areaspline = AreaSplineSeries
+		
 
 /**
  * ColumnSeries object
@@ -5663,14 +5909,15 @@ var ColumnSeries = extendClass(Series, {
 			closestPoints = series.closestPoints,
 			categoryWidth = mathAbs(
 				data[1] ? data[closestPoints].plotX - data[closestPoints - 1].plotX : 
-				inverted ? 
-				plotHeight : plotWidth
+				(inverted ? plotHeight : plotWidth)
 			),
 			groupPadding = categoryWidth * options.groupPadding,
 			groupWidth = categoryWidth - 2 * groupPadding,
 			pointOffsetWidth = groupWidth / columnCount,
-			pointPadding = pointOffsetWidth * options.pointPadding,
-			pointWidth = pointOffsetWidth - 2 * pointPadding,
+			optionPointWidth = options.pointWidth,
+			pointPadding = defined(optionPointWidth) ? (pointOffsetWidth - optionPointWidth) / 2 : 
+				pointOffsetWidth * options.pointPadding,
+			pointWidth = pick(optionPointWidth, pointOffsetWidth - 2 * pointPadding),
 			columnIndex = (chart.options.xAxis.reversed ? columnCount - 
 				series.columnIndex : series.columnIndex) || 0,
 			pointX = -(categoryWidth / 2) + groupPadding + columnIndex *
@@ -5678,13 +5925,12 @@ var ColumnSeries = extendClass(Series, {
 			//pointY0 = plotWidth - chart.xAxis.translate(0),
 			translatedY0 = series.yAxis.translate(0);
 			
-			
 		// record the new values
 		each (data, function(point) {
 			point.plotX += pointX;
 			point.w = pointWidth;
 			point.y0 = (inverted ? plotWidth : plotHeight) - translatedY0;
-			point.h = (point.yBottom || point.y0) - point.plotY;			
+			point.h = (point.yBottom || point.y0) - point.plotY;
 		});
 		
 		
@@ -5710,12 +5956,15 @@ var ColumnSeries = extendClass(Series, {
 		if (doAnimation) this.animate(true);
 	    
 		// draw the columns
+		// todo: record the rectangle coordinates and reuse them for the mouseover area
 		each (data, function(point) {
 			if (point.plotY !== undefined) layer.drawRect(
-				inverted ? chart.plotWidth - point.plotY - point.h : point.plotX,
+				inverted ? 
+					(point.h >= 0 ? chart.plotWidth - point.plotY - point.h : chart.plotWidth - point.plotY) :				
+					point.plotX,
 				inverted ? chart.plotHeight - point.plotX - point.w : 
 					(point.h >= 0 ? point.plotY : point.plotY + point.h), // for negative bars, subtract h (Opera) 
-				inverted ? point.h : point.w, 
+				inverted ? mathAbs(point.h) : point.w, 
 				inverted ? point.w : mathAbs(point.h),
 				options.borderColor, 
 				options.borderWidth, 
@@ -5794,8 +6043,8 @@ var ColumnSeries = extendClass(Series, {
 				x2 = x1 + (inverted ? pointH : point.w);
 				
 			// make sure tightly packed colums can receive mouseover
-			if (!inverted && x2 - x1 < 1) x2 = x1 + 1;
-			else if (inverted && y2 - y1 < 1) y2 = y1 + 1;
+			if (!inverted && mathAbs(x2 - x1) < 1) x2 = x1 + 1;
+			else if (inverted && mathAbs(y2 - y1) < 1) y2 = y1 + 1;
 				
 			// push an array containing the coordinates and the point
 			areas.push([
@@ -5870,6 +6119,7 @@ var ColumnSeries = extendClass(Series, {
 		Series.prototype.remove.apply(series, arguments);
 	}
 });
+seriesTypes.column = ColumnSeries;
 
 var BarSeries = extendClass(ColumnSeries, {
 	type: 'bar',
@@ -5878,6 +6128,8 @@ var BarSeries = extendClass(ColumnSeries, {
 		ColumnSeries.prototype.init.apply(this, arguments);
 	}
 });
+seriesTypes.bar = BarSeries;
+		
 
 /**
  * The scatter series class
@@ -5904,7 +6156,8 @@ var ScatterSeries = extendClass(Series, {
 	 * Cleaning the data is not necessary in a scatter plot
 	 */
 	cleanData: function() {}
-});	
+});
+seriesTypes.scatter = ScatterSeries;
 
 /**
  * Extended point object for pies
@@ -6069,6 +6322,7 @@ var PieSeries = extendClass(Series, {
 		each (this.data, function(point) {
 			series.drawPoint(point, point.layer.getCtx(), point.color);
 			
+			if (point.visible === false) point.setVisible(false);
 			
 			// draw the selected mode marker on top of the default one
 			if (point.selected)	series.drawPointState(point, 'select', point.layer);
@@ -6123,7 +6377,7 @@ var PieSeries = extendClass(Series, {
 			
 		}
 		// clear the old point on register the new one
-		if (series.hoverPoint) series.hoverPoint.stateLayer.clear();
+		if (series.hoverPoint && series.hoverPoint.stateLayer) series.hoverPoint.stateLayer.clear();
 		series.hoverPoint = point;
 	},
 	
@@ -6140,22 +6394,23 @@ var PieSeries = extendClass(Series, {
 			centerX = center[0],
 			centerY = center[1],
 			size = point.size,
+			borderWidth = options.borderWidth,
 			/* IE7 and IE6 fail to render a full circle unless start and
 			end points are equal: */
 			end = isIE && point.percentage == 100 ? point.start : point.end;
 			
 		// Todo: make Layer.prototype.drawArc method
 		if (point.y > 0) { // drawing 0 will draw a full disc in IE
-			ctx.fillStyle = Color(color).brighten(brightness).get(ctx);
+			ctx.fillStyle = setColor(Color(color).brighten(brightness).get(ctx), ctx);
 			ctx.strokeStyle = options.borderColor;
-			ctx.lineWidth = options.borderWidth;
+			ctx.lineWidth = borderWidth;
 			ctx.beginPath();
 			ctx.moveTo(centerX, centerY);
 			ctx.arc(centerX, centerY, size / 2, point.start, end, false);
 			ctx.lineTo(centerX, centerY);
 			ctx.closePath();
 			ctx.fill();
-			ctx.stroke();		
+			if (borderWidth) ctx.stroke(); // in WebKit, a zero width line will display as 1 if stroked
 		}
 	},
 	/**
@@ -6216,6 +6471,23 @@ var PieSeries = extendClass(Series, {
 	},
 	
 	/**
+	 * Extend the default setData method by first removing the old points
+	 */
+	setData: function() {
+		// destroy old points, since the pie has one layer each point
+		var series = this,
+			data = series.data,
+			i;
+		if (data) {
+			for (i = data.length - 1; i >= 0; i--) {
+				data[i].remove();
+			}
+		}
+		
+		Series.prototype.setData.apply(series, arguments);
+	},
+	
+	/**
 	 * Clear all graphics and HTML from the series layer group
 	 */
 	clear: function() {
@@ -6235,9 +6507,8 @@ var PieSeries = extendClass(Series, {
 			if (point.stateLayer) point.stateLayer.clear();
 		});
 	}
-	
 });
-
+seriesTypes.pie = PieSeries;
 
 
 // global variables
@@ -6249,10 +6520,15 @@ Highcharts = {
 			})
 		})
 	},*/
-	'numberFormat': numberFormat,
-	'dateFormat': dateFormat,
-	//'defaultOptions': defaultOptions,
-	'setOptions': setOptions,
-	'Chart': Chart
+	numberFormat: numberFormat,
+	dateFormat: dateFormat,
+	defaultOptions: defaultOptions,
+	setOptions: setOptions,
+	Chart: Chart,
+	extendClass: extendClass,
+	seriesTypes: seriesTypes,
+	Layer: Layer
 }
+
+
 })();
