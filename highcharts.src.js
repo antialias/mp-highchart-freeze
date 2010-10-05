@@ -815,7 +815,7 @@ defaultOptions = {
 		style: {
 			cursor: 'pointer',
 			color: '#909090',
-			fontSize: '10px'
+			fontSize: '11px'
 		}
 	}
 };
@@ -6077,11 +6077,11 @@ function Chart (options, callback) {
 		if (credits.enabled && !chart.credits) {
 			renderer.text(
 				credits.text,
-				chartWidth - 10,
-				chartHeight - 5,
+				10,
+				20,
 				credits.style,
 				0,
-				'right'
+				'left'
 			)
 			.on('click', function() {
 				location.href = credits.href;
