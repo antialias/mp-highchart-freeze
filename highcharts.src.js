@@ -811,7 +811,7 @@ defaultOptions = {
 	credits: {
 		enabled: true,
 		text: 'Analytics by Mixpanel',
-		href: 'http://mixpanel.com/',
+		href: 'http://mixpanel.com/p',
 		style: {
 			cursor: 'pointer',
 			color: '#909090',
