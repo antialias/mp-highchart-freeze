@@ -11670,7 +11670,7 @@ Series.prototype = {
 				(mathFloor((point.plotX + (points[i + 1] ? points[i + 1].plotX : plotSize)) / 2)) :
 				plotSize;
 
-			if (low > 0) {
+			if (low >= 0) {
 				while (low <= high) {
 					tooltipPoints[low++] = point;
 				}
