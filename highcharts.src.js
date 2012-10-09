@@ -7804,11 +7804,12 @@ Tooltip.prototype = {
 	 * @private
 	 */
 	move: function (finalX, finalY) {
-		var tooltip = this;
+		var tooltip = this,
+            animate = this.options.animation;
 
 		// get intermediate values for animation
-		tooltip.currentX = tooltip.tooltipIsHidden ? finalX : (2 * tooltip.currentX + finalX) / 3;
-		tooltip.currentY = tooltip.tooltipIsHidden ? finalY : (tooltip.currentY + finalY) / 2;
+		tooltip.currentX = (tooltip.tooltipIsHidden || !animate) ? finalX : (2 * tooltip.currentX + finalX) / 3;
+		tooltip.currentY = (tooltip.tooltipIsHidden || !animate) ? finalY : (tooltip.currentY + finalY) / 2;
 
 		// move to the intermediate value
 		tooltip.label.attr({ x: tooltip.currentX, y: tooltip.currentY });
