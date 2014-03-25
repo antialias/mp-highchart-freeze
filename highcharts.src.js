@@ -1287,14 +1287,14 @@ defaultLabelOptions = {
 	style: {
 		color: '#666',
 		cursor: 'default',
-		fontSize: '11px'
+		fontSize: '11px',
+        lineHeight: '14px'
 	}
 };
 
 defaultOptions = {
-	colors: ['#2f7ed8', '#0d233a', '#8bbc21', '#910000', '#1aadce', '#492970',
-		'#f28f43', '#77a1e5', '#c42525', '#a6c96a'],
-	//colors: ['#8085e8', '#252530', '#90ee7e', '#8d4654', '#2b908f', '#76758e', '#f6a45c', '#7eb5ee', '#f45b5b', '#9ff0cf'],
+    colors: ['#4572A7', '#AA4643', '#89A54E', '#80699B', '#3D96AE',
+            '#DB843D', '#92A8CD', '#A47D7C', '#B5CA92'],
 	symbols: ['circle', 'diamond', 'square', 'triangle', 'triangle-down'],
 	lang: {
 		loading: 'Loading...',
@@ -1337,10 +1337,10 @@ defaultOptions = {
 		//spacingRight: 10,
 		//spacingBottom: 15,
 		//spacingLeft: 10,
-		//style: {
-		//	fontFamily: '"Lucida Grande", "Lucida Sans Unicode", Verdana, Arial, Helvetica, sans-serif', // default font
-		//	fontSize: '12px'
-		//},
+		style: {
+			fontFamily: '"Lucida Grande", "Lucida Sans Unicode", Verdana, Arial, Helvetica, sans-serif', // default font
+			fontSize: '12px'
+		},
 		backgroundColor: '#FFFFFF',
 		//plotBackgroundColor: null,
 		plotBorderColor: '#C0C0C0',
@@ -1367,9 +1367,9 @@ defaultOptions = {
 		margin: 15,
 		// x: 0,
 		// verticalAlign: 'top',
-		// y: null,
+		y: 15,
 		style: {
-			color: '#274b6d',//#3E576F',
+			color: '#3E576F',
 			fontSize: '16px'
 		}
 
@@ -1380,9 +1380,9 @@ defaultOptions = {
 		// floating: false
 		// x: 0,
 		// verticalAlign: 'top',
-		// y: null,
-		style: {
-			color: '#4d759e'
+        y: 30,
+        style: {
+			color: '#6D869F'
 		}
 	},
 
@@ -1402,7 +1402,7 @@ defaultOptions = {
 			//legendIndex: 0,
 			//linecap: 'round',
 			lineWidth: 2,
-			//shadow: false,
+			shadow: true,
 			// stacking: null,
 			marker: {
 				enabled: true,
@@ -1445,7 +1445,7 @@ defaultOptions = {
 			pointRange: 0,
 			//pointStart: 0,
 			//pointInterval: 1,
-			//showInLegend: null, // auto: true for standalone series, false for linked series
+			showInLegend: null, // auto: true for standalone series, false for linked series
 			states: { // states for the entire series
 				hover: {
 					//enabled: false,
@@ -1467,7 +1467,7 @@ defaultOptions = {
 				//valuePrefix: '',
 				//ySuffix: ''				
 			//}
-			turboThreshold: 1000
+			// turboThreshold: 1000
 			// zIndex: null
 		}
 	},
@@ -1492,7 +1492,7 @@ defaultOptions = {
 		borderRadius: 5,
 		navigation: {
 			// animation: true,
-			activeColor: '#274b6d',
+			activeColor: '#3E576F',
 			// arrowSize: 12
 			inactiveColor: '#CCC'
 			// style: {} // text styles
@@ -1505,7 +1505,8 @@ defaultOptions = {
 			padding: '5px'
 		},*/
 		itemStyle: {			
-			color: '#274b6d',
+            cursor: 'pointer',
+			color: '#3E576F',
 			fontSize: '12px'
 		},
 		itemHoverStyle: {
@@ -1556,8 +1557,8 @@ defaultOptions = {
 		animation: hasSVG,
 		//crosshairs: null,
 		backgroundColor: 'rgba(255, 255, 255, .85)',
-		borderWidth: 1,
-		borderRadius: 3,
+		borderWidth: 2,
+		borderRadius: 5,
 		dateTimeLabelFormats: { 
 			millisecond: '%A, %b %e, %H:%M:%S.%L',
 			second: '%A, %b %e, %H:%M:%S',
@@ -1575,10 +1576,11 @@ defaultOptions = {
 		//shared: false,
 		snap: isTouchDevice ? 25 : 10,
 		style: {
+			fontFamily: '"Lucida Grande", "Lucida Sans Unicode", Verdana, Arial, Helvetica, sans-serif', // default font
 			color: '#333333',
 			cursor: 'default',
 			fontSize: '12px',
-			padding: '8px',
+			padding: '5px',
 			whiteSpace: 'nowrap'
 		}
 		//xDateFormat: '%A, %b %e, %Y',
@@ -1600,7 +1602,7 @@ defaultOptions = {
 		style: {
 			cursor: 'pointer',
 			color: '#909090',
-			fontSize: '9px'
+			fontSize: '10px'
 		}
 	}
 };
