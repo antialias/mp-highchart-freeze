@@ -1469,7 +1469,7 @@ defaultOptions = {
 					marker: {}
 				}
 			},
-			stickyTracking: true,
+			stickyTracking: true
 			//tooltip: {
 				//pointFormat: '<span style="color:{series.color}">{series.name}</span>: <b>{point.y}</b>'
 				//valueDecimals: null,
