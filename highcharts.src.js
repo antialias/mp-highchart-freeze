@@ -12326,6 +12326,7 @@ Chart.prototype = {
      */
     disableMouseMoveEvents: function() {
         this.mouseMoveEventsDisabled = true;
+        this.mouseOverExactPoint = undefined;
     },
 
     enableMouseMoveEvents: function() {
