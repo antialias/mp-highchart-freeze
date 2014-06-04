@@ -9634,9 +9634,9 @@ Pointer.prototype = {
 			chartPosition = this.chartPosition,
 			hoverSeries = chart.hoverSeries;
 		e = this.normalize(e, chartPosition);
-        if (chart.mouseMoveEventsDisabled) {
-            return;
-        }
+		if (chart.mouseMoveEventsDisabled) {
+			return;
+		}
 
 		// If we're outside, hide the tooltip
 		if (chartPosition && hoverSeries && !this.inClass(e.target, 'highcharts-tracker') &&
@@ -9651,9 +9651,9 @@ Pointer.prototype = {
 	onContainerMouseLeave: function () {
 		var chart = charts[hoverChartIndex];
 		if (chart) {
-            if (chart.mouseMoveEventsDisabled) {
-                return;
-            }
+			if (chart.mouseMoveEventsDisabled) {
+				return;
+			}
 			chart.pointer.reset();
 			chart.pointer.chartPosition = null; // also reset the chart position, used in #149 fix
 		}
@@ -9663,9 +9663,9 @@ Pointer.prototype = {
 	// The mousemove, touchmove and touchstart event handler
 	onContainerMouseMove: function (e) {
 		var chart = this.chart;
-        if (chart.mouseMoveEventsDisabled) {
-            return;
-        }
+		if (chart.mouseMoveEventsDisabled) {
+			return;
+		}
 
 		hoverChartIndex = chart.index;
 
@@ -10922,7 +10922,7 @@ Chart.prototype = {
 		this.axes = [];
 		this.series = [];
 		this.hasCartesianSeries = optionsChart.showAxes;
-        this.mouseMoveEventsDisabled = false;
+		this.mouseMoveEventsDisabled = false;
 		//this.axisOffset = UNDEFINED;
 		//this.maxTicks = UNDEFINED; // handle the greatest amount of ticks on grouped axes
 		//this.inverted = UNDEFINED;
@@ -12319,19 +12319,19 @@ Chart.prototype = {
 				pick(options[target + 'Left'], tArray[3])];
 	},
 
-    /**
-     * Disables / enables any events related to mouse movement.
-     * Makes the chart essentially a static chart. Note that this is a hack
-     * and not well tested with all parts / features of Highcharts.
-     */
-    disableMouseMoveEvents: function() {
-        this.mouseMoveEventsDisabled = true;
-        this.mouseOverExactPoint = undefined;
-    },
+	/**
+	 * Disables / enables any events related to mouse movement.
+	 * Makes the chart essentially a static chart. Note that this is a hack
+	 * and not well tested with all parts / features of Highcharts.
+	 */
+	disableMouseMoveEvents: function() {
+		this.mouseMoveEventsDisabled = true;
+		this.mouseOverExactPoint = undefined;
+	},
 
-    enableMouseMoveEvents: function() {
-        this.mouseMoveEventsDisabled = false;
-    }
+	enableMouseMoveEvents: function() {
+		this.mouseMoveEventsDisabled = false;
+	}
 }; // end Chart
 
 // Hook for exporting module
@@ -16934,9 +16934,9 @@ var TrackerMixin = Highcharts.TrackerMixin = {
 			singlePoint,
 			i,
 			onMouseOver = function () {
-                if (chart.mouseMoveEventsDisabled) {
-                    return;
-                }
+				if (chart.mouseMoveEventsDisabled) {
+					return;
+				}
 				if (chart.hoverSeries !== series) {
 					series.onMouseOver();
 				}
