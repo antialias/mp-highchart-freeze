@@ -9330,7 +9330,7 @@ Pointer.prototype = {
 			// check if we are actually on the point specifically
 			// just use manhattan distance because it's good enough
 			var point_dist = Math.abs((e.chartX - chart.yAxis[0].left - point.plotX) + (e.chartY - point.plotY));
-			if (point_dist > 10 && typeof mouseOverExactPoint !== 'undefined') {
+			if (point_dist > 10 && mouseOverExactPoint !== null) {
 				point.firePointEvent('mouseOutExact');
 				chart.mouseOverExactPoint = undefined;
 			}
@@ -12326,7 +12326,7 @@ Chart.prototype = {
 	 */
 	disableMouseMoveEvents: function() {
 		this.mouseMoveEventsDisabled = true;
-		this.mouseOverExactPoint = undefined;
+		this.mouseOverExactPoint = null;
 	},
 
 	enableMouseMoveEvents: function() {
