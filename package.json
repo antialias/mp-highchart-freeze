@@ -1,0 +1,20 @@
+{
+  "name": "mp-highchart-freeze",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/antialias/mp-highchart-freeze.git"
+  },
+  "keywords": [],
+  "bugs": {
+    "url": "https://github.com/antialias/mp-highchart-freeze/issues"
+  },
+  "homepage": "https://github.com/antialias/mp-highchart-freeze#readme",
+  "description": ""
+}
